@@ -13,6 +13,7 @@ glb layout:
 
 import json
 import math
+import re
 import struct
 import sys
 import time
@@ -25,6 +26,7 @@ import usd_brep as u
 
 EDGE_SAMPLES = 24
 Z_UP_TO_Y_UP = [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]  # -90° about X, as xyzw
+HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 def triangulate(stream):
@@ -40,6 +42,33 @@ def triangulate(stream):
         i += n + 1
         corner += n
     return np.asarray(tris, dtype=np.int64).reshape(-1, 3), np.asarray(corners, dtype=np.int64).reshape(-1, 3)
+
+
+def srgb_to_linear(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def read_colors(job, n, errors):
+    """colors.json {"<brep index>": "#rrggbb"} -> {index: "#rrggbb"}; bad entries go to errors."""
+    f = job / "colors.json"
+    if not f.exists():
+        return {}
+    try:
+        raw = json.loads(f.read_text())
+        if not isinstance(raw, dict):
+            raise ValueError("colors.json must be an object")
+    except Exception as e:
+        errors.append({"type": "ColorsError", "message": f"colors.json: {e}"})
+        return {}
+    colors = {}
+    for k, v in raw.items():
+        if not (k.isdigit() and int(k) < n):
+            errors.append({"type": "ColorsError", "message": f"colors.json: brep index {k!r} out of range (0..{n - 1})"})
+        elif not (isinstance(v, str) and HEX_COLOR.match(v)):
+            errors.append({"type": "ColorsError", "message": f"colors.json: {v!r} for brep {k} is not \"#rrggbb\""})
+        else:
+            colors[int(k)] = v.lower()
+    return colors
 
 
 def sample_edges(brep):
@@ -74,6 +103,17 @@ class GlbWriter:
             "extensionsUsed": ["KHR_materials_unlit"],
         }
 
+    def color_material(self, hex):
+        """Index of the face material "face:#rrggbb", created on first use."""
+        name = f"face:{hex}"
+        mats = self.gltf["materials"]
+        for i, m in enumerate(mats):
+            if m["name"] == name:
+                return i
+        rgb = [srgb_to_linear(int(hex[i : i + 2], 16) / 255) for i in (1, 3, 5)]
+        mats.append({"name": name, "pbrMetallicRoughness": {"baseColorFactor": rgb + [1], "metallicFactor": 0.0, "roughnessFactor": 0.6}, "doubleSided": True})
+        return len(mats) - 1
+
     def _accessor(self, arr, target, with_bounds=False):
         data = arr.tobytes()
         while len(self.bin) % 4:
@@ -92,7 +132,7 @@ class GlbWriter:
         self.gltf["accessors"].append(acc)
         return len(self.gltf["accessors"]) - 1
 
-    def add(self, name, positions, normals=None, lines=False):
+    def add(self, name, positions, normals=None, lines=False, material=0):
         pos = np.ascontiguousarray(positions, dtype=np.float32)
         attrs = {"POSITION": self._accessor(pos, 34962, with_bounds=True)}
         if normals is not None:
@@ -101,7 +141,7 @@ class GlbWriter:
             "attributes": attrs,
             "indices": self._accessor(np.arange(len(pos), dtype=np.uint32), 34963),
             "mode": 1 if lines else 4,
-            "material": 1 if lines else 0,
+            "material": 1 if lines else material,
         }
         self.gltf["meshes"].append({"name": name, "primitives": [prim]})
         self.gltf["nodes"].append({"name": name, "mesh": len(self.gltf["meshes"]) - 1})
@@ -132,6 +172,7 @@ def main(job):
         if not breps:
             raise ValueError("out.usda contains no BrepArray breps")
 
+        colors = read_colors(job, len(breps), report["errors"])
         glb = GlbWriter()
         all_pts = []
         stl_meshes = []
@@ -147,13 +188,14 @@ def main(job):
             report["breps"].append({
                 "index": b,
                 "info": brep.info(),
+                "color": colors.get(b),
                 "triangles": int(len(tris)),
                 "failed_faces": tess.get("failures", []),
             })
             if len(tris):
                 all_pts.append(points)
                 stl_meshes.append(trimesh.Trimesh(points, tris))
-                glb.add(f"brep{b}", points[tris].reshape(-1, 3), normals[corners].reshape(-1, 3) if len(normals) else None)
+                glb.add(f"brep{b}", points[tris].reshape(-1, 3), normals[corners].reshape(-1, 3) if len(normals) else None, material=glb.color_material(colors[b]) if b in colors else 0)
             seg = sample_edges(brep)
             if len(seg):
                 glb.add(f"brep{b}_edges", seg, lines=True)
@@ -165,7 +207,7 @@ def main(job):
         glb.write(job / "out.glb")
         if stl_meshes:
             trimesh.util.concatenate(stl_meshes).export(job / "out.stl")
-        report["ok"] = all(not e["failed_faces"] for e in report["breps"])
+        report["ok"] = not report["errors"] and all(not e["failed_faces"] for e in report["breps"])
     except Exception as e:
         report["errors"].append({"type": type(e).__name__, "message": str(e), "traceback": traceback.format_exc()})
     (job / "report.json").write_text(json.dumps(report, indent=2, default=str))

@@ -6,6 +6,7 @@
 //   usd-brep-brewer run <id>    gen.py (sandboxed) -> export.py -> summary + viewer URL
 //
 // Input:  jobs/<id>/gen.py   (must write /work/out.usda)
+//         jobs/<id>/colors.json (optional, written by gen.py: {"<brep index>": "#rrggbb"})
 // Output: jobs/<id>/{out.usda, gen.log, out.glb, out.stl, report.json}
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -121,7 +122,7 @@ async function run(id) {
     }
   }
 
-  for (const f of ["out.usda", "gen.log", "out.glb", "out.stl", "report.json"]) rmSync(path.join(job, f), { force: true });
+  for (const f of ["out.usda", "gen.log", "out.glb", "out.stl", "report.json", "colors.json"]) rmSync(path.join(job, f), { force: true });
 
   console.log("== gen.py");
   const log = [];

@@ -39,3 +39,7 @@ https://github.com/user-attachments/assets/93e992c3-c0b0-4f8a-820f-afd13207484b
 
 - Jobs live in `./jobs/<job-id>/` under the current directory.
 - Set `PORT` to change the viewer port.
+
+### Colors
+
+To color parts, have `gen.py` write `/work/colors.json`: keys are brep indices (the order the breps were passed to `out.usda`, from 0) as strings, values are `"#rrggbb"`, e.g. `{"45": "#ff7800", "46": "#ff7800"}`. Breps not listed stay gray. Each brep's color is also in `report.json` (`breps[i].color`); bad JSON, out-of-range indices or non-`#rrggbb` values are reported in `errors` and make `ok` false.

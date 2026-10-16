@@ -1,6 +1,6 @@
 {
   "name": "usd-brep-brewer",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A headless CAD for coding agents, built on NVIDIA's USD BRep.",
   "type": "module",
   "bin": {

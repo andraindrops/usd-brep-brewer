@@ -1,5 +1,7 @@
 # Created by `usd-brep-brewer new <id>`; replace build(), then run `usd-brep-brewer run <id>`.
 # Z-up, cm. Many ops consume or mutate their arguments: brep.copy() first if you reuse a shape.
+import json
+
 import usd_brep as sm
 
 
@@ -12,3 +14,5 @@ def build() -> sm.Brep:
 brep = build()
 print(brep.info())  # goes to gen.log; use report.json bounds for exact sizes
 sm.usd.export_brep(brep, "/work/out.usda")  # required output
+# optional face colors, keyed by brep index (order passed to out.usda, from 0); others stay gray:
+# json.dump({"0": "#ff7800"}, open("/work/colors.json", "w"))
